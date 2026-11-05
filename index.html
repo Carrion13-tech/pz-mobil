@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#5b5bd6">
+<title>PZ Mobil</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{--bg:#f4f5fa;--card:#fff;--fg:#1b1f33;--mut:#68708f;--line:#e2e5f0;--acc:#5b5bd6;--ok:#1e9e62;--warn:#d98a00;--bad:#d64545;}
+@media (prefers-color-scheme:dark){:root{--bg:#10121c;--card:#1a1d2b;--fg:#eef0fb;--mut:#9aa3c7;--line:#2b2f44;--acc:#8b8bff}}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--acc);color:#fff;padding:14px 16px calc(12px);display:flex;align-items:center;gap:10px}
+header h1{font-size:18px;margin:0;flex:1}header button{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:10px;padding:7px 10px;font:inherit;font-size:14px}
+main{padding:14px 14px 90px;max-width:640px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,select,textarea{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+textarea{min-height:120px;resize:vertical}
+.arten{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.arten button{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:12px;padding:10px 4px;font:inherit;font-size:13px}
+.arten button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.zwei{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font:inherit;font-weight:650;background:var(--acc);color:#fff;margin-top:12px}
+.btn.zweit{background:var(--card);color:var(--fg);border:1px solid var(--line)}
+.fotos{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.fotos div{position:relative}.fotos img{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line)}
+.fotos button{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:0;background:var(--bad);color:#fff;font-size:12px}
+.hint{font-size:12.5px;color:var(--mut);margin-top:6px}.ok{color:var(--ok)}.warn{color:var(--warn)}
+.leer{text-align:center;padding:30px 10px;color:var(--mut)}
+.verlauf div{border-bottom:1px solid var(--line);padding:8px 0;font-size:14px}.verlauf small{color:var(--mut);display:block}
+.versteckt{display:none}
+</style>
+</head>
+<body>
+<header><h1>PZ Mobil</h1><button id="bVerlauf">Verlauf</button><button id="bInfo">ⓘ</button></header>
+<main id="app"></main>
+<script>
+'use strict';
+// PZ Mobil – läuft komplett lokal auf dem Handy. Kunden/Projekte kommen per QR-Code aus der Projektzentrale
+// (bleiben nur auf diesem Gerät gespeichert); Einträge gehen als Mail mit festem Format an dich und landen
+// in der Projektzentrale unter „Eingang“.
+// Speicher: localStorage; wenn gesperrt (z. B. Vorschau in SharePoint), nur im Arbeitsspeicher
+let SPEICHER_OK = true; try { localStorage.setItem('pzm._t', '1'); localStorage.removeItem('pzm._t'); } catch (e) { SPEICHER_OK = false; }
+const MEM = {};
+const LS = (k, v) => { try { if (v === undefined) return SPEICHER_OK ? JSON.parse(localStorage.getItem('pzm.' + k) || 'null') : (MEM[k] ?? null); if (SPEICHER_OK) localStorage.setItem('pzm.' + k, JSON.stringify(v)); else MEM[k] = v; } catch (e) { return null; } };
+const LSweg = (k) => { try { delete MEM[k]; if (SPEICHER_OK) localStorage.removeItem('pzm.' + k); } catch (e) {} };
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const $ = (q) => document.querySelector(q);
+const heute = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+const ARTEN = [['stunden', 'Stunden'], ['notiz', 'Notiz'], ['anforderung', 'Anforderung'], ['besprechung', 'Besprechung'], ['offen', 'Offener Punkt'], ['frei', 'Sonstiges']];
+const ARTNAME = Object.fromEntries(ARTEN);
+let fotos = [];
+
+async function stammdatenAusLink(text) {
+  const m = String(text ?? location.hash).match(/pz=([A-Za-z0-9_.\-]+)/); if (!m) return false;
+  const roh = m[1]; let teil = 1, von = 1, daten = roh;
+  const tm = roh.match(/^(\d+)-(\d+)\.(.*)$/); if (tm) { teil = +tm[1]; von = +tm[2]; daten = tm[3]; }
+  const puffer = LS('teile') || {}; puffer[teil] = daten; puffer.von = von; LS('teile', puffer);
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  const fehlen = []; for (let i = 1; i <= von; i++) if (!puffer[i]) fehlen.push(i);
+  if (fehlen.length) { meldung(`Teil ${teil} von ${von} gelesen – bitte noch Teil ${fehlen.join(', ')} scannen.`); return true; }
+  let s = ''; for (let i = 1; i <= von; i++) s += puffer[i];
+  try {
+    const bin = Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    const txt = await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate'))).text();
+    const d = JSON.parse(txt); LS('stamm', d); LS('teile', {});
+    meldung(`Stammdaten übernommen: ${d.k.length} Kunden, Stand ${d.stand || ''}.`, true);
+  } catch (e) { LS('teile', {}); meldung('Der QR-Code konnte nicht gelesen werden – bitte neu scannen. (' + e.message + ')'); }
+  return true;
+}
+let _meldung = null;
+function meldung(t, ok) { _meldung = { t, ok }; }
+
+function render() {
+  const d = LS('stamm');
+  const app = $('#app');
+  const m = (SPEICHER_OK ? '' : `<div class="card warn"><b>Diese Adresse ist nur eine Vorschau.</b> Die Seite wird abgeschirmt angezeigt (z. B. SharePoint-Vorschau): nichts wird gespeichert, Installieren geht nicht. Die App braucht eine Adresse, unter der index.html direkt ausgeliefert wird.</div>`) + (_meldung ? `<div class="card ${_meldung.ok ? 'ok' : 'warn'}">${esc(_meldung.t)}</div>` : ''); _meldung = null;
+  if (!d) { app.innerHTML = m + `<div class="card leer"><b>Noch keine Kunden und Projekte</b><p>In der Projektzentrale unter <b>Einstellungen → Handy-App</b> auf „QR-Code anzeigen“ klicken und den Code mit der Handy-Kamera scannen.</p></div><div class="card"><b>Einrichtungs-Link einfügen</b><p class="hint">Statt QR-Code: in der Projektzentrale „Link kopieren“ oder „Per Mail an mich“ – hier den ganzen Link einfügen.</p><textarea id="codeIn" placeholder="https://…#pz=…"></textarea><button class="btn" id="codeOk">Übernehmen</button></div>`; codeEinfuegen(); return; }
+  const f = LS('entwurf') || { art: 'stunden', datum: heute() };
+  const kOpt = d.k.map(([k]) => `<option${k === f.k ? ' selected' : ''}>${esc(k)}</option>`).join('');
+  app.innerHTML = m + `<div class="card"><div class="arten">${ARTEN.map(([a, l]) => `<button data-art="${a}" class="${f.art === a ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <label>Kunde</label><select id="k"><option value="">– Kunde wählen –</option>${kOpt}</select>
+    <label>Projekt</label><select id="p"></select>
+    <div class="zwei"><div><label>Datum</label><input id="datum" type="date" value="${esc(f.datum || heute())}"></div>
+      <div id="dauerBox"><label>${f.art === 'besprechung' ? 'Dauer (h, optional)' : 'Stunden'}</label><input id="dauer" inputmode="decimal" placeholder="z. B. 2,5" value="${esc(f.dauer || '')}"></div></div>
+    <div id="faelligBox" class="versteckt"><label>Fällig am (optional)</label><input id="faellig" type="date" value="${esc(f.faellig || '')}"></div>
+    <label id="titelL">Titel</label><input id="titel" value="${esc(f.titel || '')}" placeholder="kurz und knapp">
+    <label id="textL">Text</label><textarea id="text" placeholder="Tippen oder mit der Wispr-Flow-Tastatur diktieren">${esc(f.text || '')}</textarea>
+    <label>Fotos (optional)</label><input id="foto" type="file" accept="image/*" capture="environment" multiple>
+    <div class="fotos" id="fotos"></div>
+    <button class="btn" id="senden">An die Projektzentrale senden</button>
+    <button class="btn zweit" id="leeren">Formular leeren</button>
+    <div class="hint">Gesendet wird eine Mail an ${esc(d.ich && d.ich.email || 'dich')}; die Projektzentrale legt sie unter „Eingang“ zur Übernahme bereit.</div></div>`;
+  const ps = $('#p');
+  const projekte = (k) => { const e = d.k.find((x) => x[0] === k); return e ? e[1] : []; };
+  const zeigeP = () => { const k = $('#k').value; ps.innerHTML = `<option value="">(ohne Projekt)</option>` + projekte(k).map(([p, c]) => `<option value="${esc(p)}"${p === f.p ? ' selected' : ''}>${esc(p)}${c ? ' · CATS ' + esc(c) : ''}</option>`).join(''); };
+  zeigeP();
+  const sichtbar = () => {
+    const a = f.art;
+    $('#dauerBox').classList.toggle('versteckt', !['stunden', 'besprechung'].includes(a));
+    $('#faelligBox').classList.toggle('versteckt', !['anforderung', 'offen'].includes(a));
+    $('#titelL').textContent = a === 'stunden' ? 'Buchungstext' : 'Titel';
+    $('#textL').textContent = a === 'stunden' ? 'CATS-Text (optional)' : a === 'besprechung' ? 'Notizen / Ergebnisse' : 'Text';
+  };
+  sichtbar();
+  const merken = () => { Object.assign(f, { k: $('#k').value, p: ps.value, datum: $('#datum').value, dauer: $('#dauer').value, faellig: $('#faellig').value, titel: $('#titel').value, text: $('#text').value }); LS('entwurf', f); };
+  app.querySelectorAll('[data-art]').forEach((b) => b.addEventListener('click', () => { merken(); f.art = b.dataset.art; LS('entwurf', f); render(); }));
+  $('#k').addEventListener('change', () => { f.p = ''; zeigeP(); merken(); });
+  app.querySelectorAll('input,select,textarea').forEach((x) => x.addEventListener('input', merken));
+  const fotoZeichnen = () => { $('#fotos').innerHTML = fotos.map((x, i) => `<div><img src="${x.url}"><button data-weg="${i}">✕</button></div>`).join(''); $('#fotos').querySelectorAll('[data-weg]').forEach((b) => b.addEventListener('click', () => { fotos.splice(+b.dataset.weg, 1); fotoZeichnen(); })); };
+  fotoZeichnen();
+  $('#foto').addEventListener('change', (e) => { for (const fl of e.target.files) fotos.push({ file: fl, url: URL.createObjectURL(fl) }); e.target.value = ''; fotoZeichnen(); });
+  $('#leeren').addEventListener('click', () => { if (confirm('Formular leeren?')) { LS('entwurf', { art: f.art, datum: heute() }); fotos = []; render(); } });
+  $('#senden').addEventListener('click', () => { merken(); senden(f, d); });
+}
+
+function codeEinfuegen() {
+  const b = $('#codeOk'); if (!b) return;
+  b.addEventListener('click', async () => { if (await stammdatenAusLink($('#codeIn').value.trim())) render(); else alert('Darin ist kein Einrichtungs-Code (pz=…) enthalten.'); });
+}
+
+async function senden(f, d) {
+  if (!f.k) { alert('Bitte einen Kunden wählen.'); return; }
+  if (f.art === 'stunden' && !f.dauer) { alert('Bitte die Stunden angeben.'); return; }
+  if (!f.titel && !f.text) { alert('Bitte einen Titel oder Text eingeben.'); return; }
+  const betreff = `PZ: ${ARTNAME[f.art]} | ${f.k}${f.p ? ' | ' + f.p : ''}${f.titel ? ' | ' + f.titel : ''}`;
+  const zeilen = ['PZ-EINGANG v1', 'Art: ' + f.art, 'Kunde: ' + f.k, 'Projekt: ' + (f.p || ''), 'Datum: ' + (f.datum || heute())];
+  if (f.dauer) zeilen.push('Dauer: ' + f.dauer);
+  if (f.faellig) zeilen.push('Faellig: ' + f.faellig);
+  zeilen.push('Titel: ' + (f.titel || '').replace(/\n/g, ' '), '---', f.text || '', '---', 'Gesendet mit PZ Mobil');
+  const text = zeilen.join('\n');
+  const an = (d.ich && d.ich.email) || '';
+  try {
+    if (fotos.length && navigator.canShare && navigator.canShare({ files: fotos.map((x) => x.file) })) {
+      await navigator.share({ title: betreff, text: 'An: ' + an + '\nBetreff: ' + betreff + '\n\n' + text, files: fotos.map((x) => x.file) });
+    } else {
+      if (fotos.length) alert('Fotos lassen sich hier nicht direkt anhängen – die Mail öffnet sich ohne Fotos. Bitte in der Mail-App anhängen.');
+      location.href = `mailto:${encodeURIComponent(an)}?subject=${encodeURIComponent(betreff)}&body=${encodeURIComponent(text)}`;
+    }
+  } catch (e) { if (e.name !== 'AbortError') alert('Senden nicht möglich: ' + e.message); return; }
+  const v = LS('verlauf') || []; v.unshift({ am: new Date().toISOString(), betreff, fotos: fotos.length }); LS('verlauf', v.slice(0, 30));
+  LS('entwurf', { art: f.art, k: f.k, p: f.p, datum: heute() }); fotos = [];
+  meldung('Mail vorbereitet – in der Mail-App nur noch „Senden“ tippen.', true); render();
+}
+
+$('#bVerlauf').addEventListener('click', () => {
+  const v = LS('verlauf') || [];
+  $('#app').innerHTML = `<div class="card verlauf"><b>Zuletzt gesendet</b>${v.map((x) => `<div>${esc(x.betreff)}<small>${new Date(x.am).toLocaleString('de-AT')}${x.fotos ? ' · ' + x.fotos + ' Foto(s)' : ''}</small></div>`).join('') || '<p class="leer">Noch nichts gesendet.</p>'}</div><button class="btn zweit" id="zurueck">Zurück</button>`;
+  $('#zurueck').addEventListener('click', render);
+});
+$('#bInfo').addEventListener('click', () => {
+  const d = LS('stamm');
+  $('#app').innerHTML = `<div class="card"><b>PZ Mobil</b><p class="hint">Alles bleibt auf diesem Handy. Kunden und Projekte: ${d ? d.k.length + ' Kunden, Stand ' + esc(d.stand || '') : 'noch keine'}. Neu laden: in der Projektzentrale unter Einstellungen → Handy-App den QR-Code scannen.</p>
+    <p class="hint">Senden: Die App öffnet deine Mail-App mit fertigem Betreff und Text (mit Fotos über „Teilen“). Die Projektzentrale erkennt die Mail an „PZ:“ im Betreff und legt sie unter „Eingang“ ab.</p></div>
+    <div class="card"><b>Einrichtungs-Link einfügen</b><p class="hint">Statt QR-Code: in der Projektzentrale „Link kopieren“ oder „Per Mail an mich“ – hier den ganzen Link einfügen.</p><textarea id="codeIn" placeholder="https://…#pz=…"></textarea><button class="btn" id="codeOk">Übernehmen</button></div>
+    <button class="btn zweit" id="loeschen">Alle Daten dieser App löschen</button><button class="btn zweit" id="zurueck">Zurück</button>`;
+  $('#zurueck').addEventListener('click', render);
+  codeEinfuegen();
+  $('#loeschen').addEventListener('click', () => { if (confirm('Kunden, Projekte, Entwurf und Verlauf von diesem Handy löschen?')) { ['stamm', 'entwurf', 'verlauf', 'teile'].forEach(LSweg); render(); } });
+});
+window.addEventListener('hashchange', async () => { if (await stammdatenAusLink()) render(); });
+stammdatenAusLink().then(render);
+try { if (SPEICHER_OK && 'serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {}); } catch (e) {}
+</script>
+</body>
+</html>
