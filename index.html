@@ -30,6 +30,9 @@ textarea{min-height:120px;resize:vertical}
 .leer{text-align:center;padding:30px 10px;color:var(--mut)}
 .verlauf div{border-bottom:1px solid var(--line);padding:8px 0;font-size:14px}.verlauf small{color:var(--mut);display:block}
 .versteckt{display:none}
+.treffer{border:1px solid var(--line);border-radius:10px;margin-top:4px;max-height:260px;overflow:auto;background:var(--bg)}
+.treffer button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;color:var(--fg);font:inherit;font-size:14px;padding:10px 12px}
+.treffer button small{display:block;color:var(--mut);font-size:12px}.treffer .nix{padding:10px 12px;color:var(--mut);font-size:13px}
 </style>
 </head>
 <body>
@@ -80,6 +83,7 @@ function render() {
   const f = LS('entwurf') || { art: 'stunden', datum: heute() };
   const kOpt = d.k.map(([k]) => `<option${k === f.k ? ' selected' : ''}>${esc(k)}</option>`).join('');
   app.innerHTML = m + `<div class="card"><div class="arten">${ARTEN.map(([a, l]) => `<button data-art="${a}" class="${f.art === a ? 'on' : ''}">${l}</button>`).join('')}</div>
+    <label>Suchen (Kunde, Projekt oder CATS-Nummer)</label><input id="such" type="search" placeholder="Tippen, z. B. „müller supp“ oder „17578“" autocomplete="off"><div id="treffer" class="treffer versteckt"></div>
     <label>Kunde</label><select id="k"><option value="">– Kunde wählen –</option>${kOpt}</select>
     <label>Projekt</label><select id="p"></select>
     <div class="zwei"><div><label>Datum</label><input id="datum" type="date" value="${esc(f.datum || heute())}"></div>
@@ -107,6 +111,22 @@ function render() {
   const merken = () => { Object.assign(f, { k: $('#k').value, p: ps.value, datum: $('#datum').value, dauer: $('#dauer').value, faellig: $('#faellig').value, titel: $('#titel').value, text: $('#text').value }); LS('entwurf', f); };
   app.querySelectorAll('[data-art]').forEach((b) => b.addEventListener('click', () => { merken(); f.art = b.dataset.art; LS('entwurf', f); render(); }));
   $('#k').addEventListener('change', () => { f.p = ''; zeigeP(); merken(); });
+  // Suche: alle Wörter müssen vorkommen (ohne Groß/Klein, Umlaute = ae/oe/ue)
+  const norm = (x) => String(x || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+  const alle = []; d.k.forEach(([k, pl]) => { alle.push({ k, p: '', c: '' }); pl.forEach(([p, c]) => alle.push({ k, p, c: c || '' })); });
+  const such = $('#such'), tr = $('#treffer');
+  such.addEventListener('input', () => {
+    const w = norm(such.value).split(/\s+/).filter(Boolean);
+    if (!w.length) { tr.classList.add('versteckt'); return; }
+    const L = alle.filter((x) => { const h = norm(x.k + ' ' + x.p + ' ' + x.c); return w.every((y) => h.includes(y)); })
+      .sort((a, b) => (!!a.p - !!b.p) || 0).slice(0, 30);
+    tr.innerHTML = L.length ? L.map((x, i) => `<button type="button" data-i="${i}">${esc(x.p || x.k)}<small>${x.p ? esc(x.k) + (x.c ? ' · CATS ' + esc(x.c) : '') : 'Kunde (ohne Projekt)'}</small></button>`).join('') : '<div class="nix">Nichts gefunden</div>';
+    tr.classList.remove('versteckt');
+    tr.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => {
+      const x = L[+b.dataset.i]; $('#k').value = x.k; f.p = x.p; zeigeP(); ps.value = x.p; merken();
+      such.value = ''; tr.classList.add('versteckt');
+    }));
+  });
   app.querySelectorAll('input,select,textarea').forEach((x) => x.addEventListener('input', merken));
   const fotoZeichnen = () => { $('#fotos').innerHTML = fotos.map((x, i) => `<div><img src="${x.url}"><button data-weg="${i}">✕</button></div>`).join(''); $('#fotos').querySelectorAll('[data-weg]').forEach((b) => b.addEventListener('click', () => { fotos.splice(+b.dataset.weg, 1); fotoZeichnen(); })); };
   fotoZeichnen();
